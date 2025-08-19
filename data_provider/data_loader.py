@@ -142,6 +142,10 @@ class Dataset_Custom(Dataset):
         seq_y = self.data_y[r_begin:r_end, feat_id:feat_id+1]
         seq_x_mark = self.data_stamp[s_begin:s_end:self.token_len]
         seq_y_mark = self.data_stamp[s_end:r_end:self.token_len]
+        # print("seq_x:", seq_x.shape)
+        # print("seq_y:", seq_y.shape)
+        # print("seq_x_mark:", seq_x_mark.shape)
+        # print("seq_y_mark:", seq_y_mark.shape)
         return seq_x, seq_y, seq_x_mark, seq_y_mark
 
     def __len__(self):
@@ -442,14 +446,19 @@ class Dataset_Preprocess(Dataset):
         s_begin = index % self.tot_len
         s_end = s_begin + self.token_len
         start = datetime.datetime.strptime(self.data_stamp[s_begin], "%Y-%m-%d %H:%M:%S")
-        if self.data_set_type in ['traffic', 'electricity', 'ETTh1', 'ETTh2']:
+        if self.data_set_type in ['traffic', 'electricity', 'ETTh1', 'ETTh2','synthetic']:
             end = (start + datetime.timedelta(hours=self.token_len-1)).strftime("%Y-%m-%d %H:%M:%S")
         elif self.data_set_type == 'weather':
             end = (start + datetime.timedelta(minutes=10*(self.token_len-1))).strftime("%Y-%m-%d %H:%M:%S")
         elif self.data_set_type in ['ETTm1', 'ETTm2']:
             end = (start + datetime.timedelta(minutes=15*(self.token_len-1))).strftime("%Y-%m-%d %H:%M:%S")
+        elif self.data_set_type == 'synthetic_multivariate':
+            end = (start + datetime.timedelta(days=self.token_len-1)).strftime("%Y-%m-%d %H:%M:%S")
+        elif self.data_set_type == 'permno10000':
+            end = (start + pd.DateOffset(months=3*(self.token_len - 1))).strftime("%Y-%m-%d %H:%M:%S")
         seq_x_mark = f"This is Time Series from {self.data_stamp[s_begin]} to {end}"
         return seq_x_mark
 
     def __len__(self):
         return len(self.data_stamp)
+

@@ -68,11 +68,21 @@ if __name__ == '__main__':
     parser.add_argument('--mix_embeds', action='store_true', help='mix embeds', default=False)
     parser.add_argument('--test_dir', type=str, default='./test', help='test dir')
     parser.add_argument('--test_file_name', type=str, default='checkpoint.pth', help='test file')
+
+    # Panel dataset columns (only used when --data panel_cov)
+    parser.add_argument('--panel_id_col', type=str, default='PERMNO')
+    parser.add_argument('--panel_time_col', type=str, default='DATE')
+    parser.add_argument('--panel_y_col', type=str, default='actual')
+    parser.add_argument('--panel_cov_cols', type=str, default='',
+                        help='comma-separated covariate columns; leave empty to infer')
+
+    # Loss on target channel only (with Dataset_PanelCov the target is LAST channel in seq_x)
+    parser.add_argument('--target_var_idx', type=int, default=-1)
     
     # GPU
     parser.add_argument('--gpu', type=int, default=0, help='gpu')
     parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
-    parser.add_argument('--visualize', action='store_true', help='visualize', default=False)
+    parser.add_argument('--visualize', action='store_true', help='visualize', default=True)
     args = parser.parse_args()
 
     if args.use_multi_gpu:

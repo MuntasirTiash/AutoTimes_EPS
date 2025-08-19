@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import torch
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -83,6 +84,9 @@ class EarlyStopping:
             if k in param_grad_dic.keys() and not param_grad_dic[k]:
                 # delete parameters that do not require gradient
                 del state_dict[k]
+        
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)     # <-- make sure it exists
         torch.save(state_dict, path + '/' + f'checkpoint.pth')
         
 

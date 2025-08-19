@@ -42,6 +42,8 @@ class Model(nn.Module):
                             configs.dropout, configs.mlp_activation) 
     
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
+        # print("x_enc:", x_enc.shape)           # [bs, seq_len, n_vars]
+        # print("x_mark_enc:", x_mark_enc.shape) # [bs * n_vars, token_num, hidden_dim]
         means = x_enc.mean(1, keepdim=True).detach()    
         x_enc = x_enc - means
         stdev = torch.sqrt(

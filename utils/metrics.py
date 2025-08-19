@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.metrics import r2_score
 
 
 def RSE(pred, true):
@@ -31,11 +32,33 @@ def MSPE(pred, true):
     return np.mean(np.square((pred - true) / true))
 
 
-def metric(pred, true):
-    mae = MAE(pred, true)
-    mse = MSE(pred, true)
-    rmse = RMSE(pred, true)
-    mape = MAPE(pred, true)
-    mspe = MSPE(pred, true)
+# ------------------------------------------------------------------
+# new metrics
+# ------------------------------------------------------------------
+def R2(pred, true):
+    """
+    Coefficient of determination using sklearn's implementation.
+    Works for any shape that flattens to (n_samples,).
+    """
+    return r2_score(true.reshape(-1), pred.reshape(-1))
 
-    return mae, mse, rmse, mape, mspe
+def kelly_R2(pred, true):
+    """
+    Custom 'Kelly R²':
+        1 - Σ(y - ŷ)² / Σ(y)²
+    """
+    diff = np.sum(np.square(true - pred)) / np.sum(np.square(true))
+    return 1.0 - diff
+
+# ------------------------------------------------------------------
+# master wrapper (returns 7 numbers)
+# ------------------------------------------------------------------
+def metric(pred, true):
+    mae   = MAE(pred, true)
+    mse   = MSE(pred, true)
+    rmse  = RMSE(pred, true)
+    mape  = MAPE(pred, true)
+    mspe  = MSPE(pred, true)
+    r2    = R2(pred, true)
+    k_r2  = kelly_R2(pred, true)
+    return mae, mse, rmse, mape, mspe, r2, k_r2
