@@ -78,9 +78,14 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     outputs = outputs[:, :, :]
                     batch_y = batch_y[:, :, :].to(self.device)
 
-                loss = criterion(outputs, batch_y)
+                # loss = criterion(outputs, batch_y)
 
-                loss = loss.detach().cpu()
+                # loss = loss.detach().cpu()
+                tgt = self.args.target_var_idx
+                #pred = outputs[:, :, tgt:tgt+1].detach().cpu()
+                pred = outputs[:, :, -1:].detach().cpu()
+                true = batch_y.detach().cpu()
+                loss = criterion(pred, true)
                 total_loss.append(loss)
                 total_count.append(batch_x.shape[0])
                 if (i + 1) % 100 == 0:
@@ -136,6 +141,16 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 batch_y = batch_y.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
+                def _assert_finite(name, t):
+                    if not torch.isfinite(t).all():
+                        bad = (~torch.isfinite(t)).nonzero(as_tuple=False)[:5]
+                        raise RuntimeError(f"{name} contains non-finite values at indices (showing first 5): {bad}")
+
+                # In train() minibatch loop, after moving to device:
+                _assert_finite("batch_x", batch_x)
+                _assert_finite("batch_y", batch_y)
+                _assert_finite("batch_x_mark", batch_x_mark)
+                _assert_finite("batch_y_mark", batch_y_mark)
 
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
@@ -145,7 +160,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         count += 1
                 else:
                     outputs = self.model(batch_x, batch_x_mark, None, batch_y_mark)
-                    loss = criterion(outputs, batch_y)
+                    # print("The output for this batch is: ",outputs)
+                    if not torch.isfinite(outputs).all():
+                        raise RuntimeError("Model outputs contain NaN/Inf")
+                    # loss = criterion(outputs, batch_y)
+                    tgt = self.args.target_var_idx
+                    #outputs_y = outputs[:, :, tgt:tgt+1]
+                    outputs_y = outputs[:, :, -1:]   
+                    # print("outputs_y is: ", outputs_y)
+                    # print("batch_y is: ", batch_y)
+                    loss = criterion(outputs_y, batch_y)
+                    # print("Loss for this batch is: ", loss.item())
                     loss_val += loss.item()
                     count += 1
                 
@@ -230,35 +255,53 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
+                # how many autoregressive steps do we need
                 inference_steps = self.args.test_pred_len // self.args.token_len
                 dis = self.args.test_pred_len - inference_steps * self.args.token_len
                 if dis != 0:
                     inference_steps += 1
+
                 pred_y = []
                 for j in range(inference_steps):
                     if len(pred_y) != 0:
+                        # shift encoder window and marks by one token, append last predicted token
                         batch_x = torch.cat([batch_x[:, self.args.token_len:, :], pred_y[-1]], dim=1)
                         tmp = batch_y_mark[:, j-1:j, :]
                         batch_x_mark = torch.cat([batch_x_mark[:, 1:, :], tmp], dim=1)
-                        
+
                     if self.args.use_amp:
                         with torch.cuda.amp.autocast():
                             outputs = self.model(batch_x, batch_x_mark, None, batch_y_mark)
                     else:
                         outputs = self.model(batch_x, batch_x_mark, None, batch_y_mark)
+                    # take the last token_len steps from the model output
                     pred_y.append(outputs[:, -self.args.token_len:, :])
-                pred_y = torch.cat(pred_y, dim=1)
-                if dis != 0:
-                    pred_y = pred_y[:, :-(self.args.token_len - dis), :]
-                batch_y = batch_y[:, -self.args.test_pred_len:, :].to(self.device)
-                outputs = pred_y.detach().cpu()
-                batch_y = batch_y.detach().cpu()
 
-                pred = outputs
-                true = batch_y
+                # concat all predicted tokens along time
+                pred_y = torch.cat(pred_y, dim=1)  # [B, steps*token_len, C]
+                if dis != 0:
+                    # trim extra steps so length == test_pred_len
+                    pred_y = pred_y[:, :-(self.args.token_len - dis), :]
+
+                # align ground-truth target window to the same horizon
+                batch_y = batch_y[:, -self.args.test_pred_len:, :]  # [B, T_pred, 1]
+
+                # --- slice the target channel from the autoregressive predictions ---
+                tgt = self.args.target_var_idx  # e.g., -1 means last channel
+                if tgt < 0:
+                    tgt = pred_y.shape[-1] + tgt
+                outputs_y = pred_y[:, :, tgt:tgt+1]  # [B, T_pred, 1]
+
+                # safety: time dimension must match
+                assert outputs_y.shape[1] == batch_y.shape[1], f"time mismatch: pred {outputs_y.shape} vs true {batch_y.shape}"
+
+                # detach for accumulation
+                pred = outputs_y.detach().cpu()
+                true = batch_y.detach().cpu()
 
                 preds.append(pred)
                 trues.append(true)
+
                 if (i + 1) % 100 == 0:
                     if (self.args.use_multi_gpu and self.args.local_rank == 0) or not self.args.use_multi_gpu:
                         speed = (time.time() - time_now) / iter_count
@@ -266,10 +309,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         print("\titers: {}, speed: {:.4f}s/iter, left time: {:.4f}s".format(i + 1, speed, left_time))
                         iter_count = 0
                         time_now = time.time()
-                    
+
                 if self.args.visualize and i == 0:
-                    gt = np.array(true[0, :, -1])
-                    pd = np.array(pred[0, :, -1])
+                    gt = np.array(true[0, :, 0])
+                    pd = np.array(pred[0, :, 0])
                     lookback = batch_x[0, :, -1].detach().cpu().numpy()
                     gt = np.concatenate([lookback, gt], axis=0)
                     pd = np.concatenate([lookback, pd], axis=0)
@@ -277,16 +320,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     if not os.path.exists(dir_path):
                         os.makedirs(dir_path)
                     visual(gt, pd, os.path.join(dir_path, f'{i}.png'))
-        
+
         preds = torch.cat(preds, dim=0).numpy()
         trues = torch.cat(trues, dim=0).numpy()
-        
-        mae, mse, rmse, mape, mspe = metric(preds, trues)
-        print('mse:{}, mae:{}'.format(mse, mae))
-        f = open("result_long_term_forecast.txt", 'a')
-        f.write(setting + "  \n")
-        f.write('mse:{}, mae:{}'.format(mse, mae))
-        f.write('\n')
-        f.write('\n')
-        f.close()
+        np.save(os.path.join(folder_path, 'predictions.npy'), preds)
+        np.save(os.path.join(folder_path, 'ground_truth.npy'), trues)
+
+        mae, mse, rmse, mape, mspe, r2, kelly_r2 = metric(preds, trues)
+        print(f"MSE: {mse:.4f}  MAE: {mae:.4f}  R²: {r2:.4f}  Kelly R²: {kelly_r2:.4f}")
+        with open("result_long_term_forecast.txt", 'a') as f:
+            f.write(setting + "  \n")
+            f.write('mse:{}, mae:{}, r2:{}, kelly_r2:{}'.format(mse, mae, r2, kelly_r2))
+            f.write('\n\n')
         return
+# comment for git diff
