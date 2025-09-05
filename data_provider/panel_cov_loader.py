@@ -5,6 +5,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler
+from bisect import bisect_right
 
 
 class Dataset_PanelCov(Dataset):
@@ -17,8 +18,13 @@ class Dataset_PanelCov(Dataset):
     - seq_y: [label_len + pred_len, 1] from the RAW 'actual' (no ffill for targets)
     - *_mark: zeros (keep --mix_embeds off unless you add time-text embeddings)
 
+    Splits by TARGET END date (encoder may borrow history across boundaries):
+      • Train: target_end <  2012-01-01
+      • Val  : 2012-01-01 ≤ target_end < 2015-01-01
+      • Test : target_end ≥ 2015-01-01
+
     Missing-data policy:
-      • Covariates: forward-fill within each PERMNO (no backfill to avoid leaking future).
+      • Covariates: forward-fill within each PERMNO (no backfill to avoid future leak).
       • 'actual' in encoder (past): forward-fill for inputs only.
       • 'actual' in target window: must be fully observed; windows with NaN target are skipped.
     """
@@ -35,8 +41,12 @@ class Dataset_PanelCov(Dataset):
         scale=True,
         seasonal_patterns=None,
         drop_short=False,
-        split_by='entity',
-        require_full_x=True        # skip windows if any NaN remains in seq_x after ffill
+        split_by='date',
+        require_full_x=True,       # skip windows if any NaN remains in seq_x after ffill
+        # ---- text fusion options ----
+        text_index_csv=None,       # CSV: PERMNO,FILING_DATE,EMB_PATH  (precomputed embeddings)
+        text_default_dim=4096,     # embedding dim if no text is found
+        text_mode='emb',           # 'emb' (default) or 'ids' (pre-tokenized npz with input_ids/attention_mask)
     ):
         super().__init__()
         assert flag in ['train', 'val', 'test']
@@ -57,15 +67,77 @@ class Dataset_PanelCov(Dataset):
         self.split_by = split_by
         self.require_full_x = require_full_x
 
-        self._read_and_index()
+        self.text_index_csv = text_index_csv
+        self.text_default_dim = int(text_default_dim)
+        self.text_mode = text_mode
 
+        self._read_and_index()
+        self._build_text_index()
+
+    # ------------ TEXT INDEX ------------
+    def _build_text_index(self):
+        """Build per-PERMNO map to ordered filings and paths."""
+        self.text_index = None
+        if not self.text_index_csv:
+            return
+        meta = pd.read_csv(self.text_index_csv)
+        # For 'emb' mode, expect: PERMNO, FILING_DATE, EMB_PATH
+        # For 'ids' mode, expect: PERMNO, FILING_DATE, NPZ_PATH  (with input_ids/attention_mask)
+        date_col = 'FILING_DATE'
+        path_col = 'EMB_PATH' if self.text_mode == 'emb' else 'NPZ_PATH'
+        if date_col not in meta.columns or path_col not in meta.columns:
+            raise ValueError(f"{self.text_index_csv} must have columns {date_col} and {path_col}")
+
+        meta[date_col] = pd.to_datetime(meta[date_col])
+        self.text_index = {}
+        for pid, sub in meta.groupby('PERMNO'):
+            sub = sub.sort_values(date_col)
+            self.text_index[pid] = {
+                'dates': sub[date_col].to_numpy(),
+                'paths': sub[path_col].tolist(),
+            }
+
+    def _lookup_text_for(self, permno, asof_date):
+        """
+        Return most-recent 10-Q payload (<= asof_date).
+        emb-mode: float32 array [T_text, D] (often [1, D])
+        ids-mode: dict {'input_ids': LongTensor[T], 'attention_mask': LongTensor[T]}
+        """
+        if self.text_index is None or permno not in self.text_index:
+            if self.text_mode == 'emb':
+                return np.zeros((1, self.text_default_dim), dtype=np.float32)
+            else:
+                return {'input_ids': torch.zeros(1, dtype=torch.long),
+                        'attention_mask': torch.zeros(1, dtype=torch.long)}
+        dates = self.text_index[permno]['dates']
+        paths = self.text_index[permno]['paths']
+        i = bisect_right(dates, asof_date) - 1
+        if i < 0:
+            if self.text_mode == 'emb':
+                return np.zeros((1, self.text_default_dim), dtype=np.float32)
+            else:
+                return {'input_ids': torch.zeros(1, dtype=torch.long),
+                        'attention_mask': torch.zeros(1, dtype=torch.long)}
+
+        path = paths[i]
+        if self.text_mode == 'emb':
+            arr = np.asarray(np.load(path), dtype=np.float32)
+            if arr.ndim == 1:
+                arr = arr[None, :]
+            return arr  # [T_text, D]
+        else:
+            # npz with arrays 'input_ids', 'attention_mask'
+            npz = np.load(path)
+            ids = torch.as_tensor(npz['input_ids'], dtype=torch.long)
+            attn = torch.as_tensor(npz['attention_mask'], dtype=torch.long)
+            return {'input_ids': ids, 'attention_mask': attn}
+
+    # ------------ CORE ------------
     def _read_and_index(self):
         df = pd.read_csv(os.path.join(self.root_path, self.data_path))
         df[self.time_col] = pd.to_datetime(df[self.time_col])
-        # ---- Hard-coded global split cutoffs
-        # Train: all timestamps strictly before CUTOFF_TRAIN
-        # Val  : timestamps in [CUTOFF_TRAIN, CUTOFF_VAL)
-        # Test : timestamps on/after CUTOFF_VAL
+
+        # Hard-coded cutoffs
         CUTOFF_TRAIN = pd.Timestamp('2012-01-01')
         CUTOFF_VAL   = pd.Timestamp('2015-01-01')
 
@@ -101,7 +173,7 @@ class Dataset_PanelCov(Dataset):
             self.series_dates.append(d)
             self.series_ids.append(gid)
 
-        # ---- Standardize using ONLY TRAIN dates (DATE < CUTOFF_TRAIN), guard zero-variance
+        # Standardize using ONLY TRAIN dates
         if self.scale and len(self.series_X):
             train_chunks = []
             for X, d in zip(self.series_X, self.series_dates):
@@ -109,11 +181,10 @@ class Dataset_PanelCov(Dataset):
                 if mask_train.any():
                     train_chunks.append(X[mask_train])
             if not train_chunks:
-                raise ValueError("No training rows found before CUTOFF_TRAIN; adjust cutoff or verify data.")
+                raise ValueError("No training rows before 2012-01-01; adjust cutoff or verify data.")
             train_all = np.concatenate(train_chunks, axis=0)
 
             self.scaler = StandardScaler().fit(train_all)
-            # guard against zero variance -> set to 1.0
             zero_scale = (self.scaler.scale_ == 0) | ~np.isfinite(self.scaler.scale_)
             if zero_scale.any():
                 self.scaler.scale_[zero_scale] = 1.0
@@ -125,11 +196,7 @@ class Dataset_PanelCov(Dataset):
             self.scaler = None
             self.y_mean_, self.y_scale_ = 0.0, 1.0
 
-        # ---- Build (entity, start) index with DATE-based splits
-        # Train: target end < CUTOFF_TRAIN
-        # Val  : CUTOFF_TRAIN ≤ target end < CUTOFF_VAL
-        # Test : target end ≥ CUTOFF_VAL
-        # NOTE: For val/test, the encoder is allowed to use earlier history (even if it falls in train).
+        # Build (entity, start) index with TARGET-END based splits
         self.index_pairs = []
         for i, (X, y, d) in enumerate(zip(self.series_X, self.series_y_raw, self.series_dates)):
             n = len(X)
@@ -137,10 +204,10 @@ class Dataset_PanelCov(Dataset):
             if max_start <= 0:
                 continue
             for s in range(max_start):
-                s_end = s + self.seq_len
+                s_end   = s + self.seq_len
                 r_begin = s_end - self.label_len
-                r_end = s_end + self.pred_len
-                # Split by TARGET END date only (allow encoder to borrow past history)
+                r_end   = s_end + self.pred_len
+
                 tgt_end = d[r_end - 1]
                 if self.flag == 'train':
                     if not (tgt_end < CUTOFF_TRAIN):
@@ -148,24 +215,19 @@ class Dataset_PanelCov(Dataset):
                 elif self.flag == 'val':
                     if not (CUTOFF_TRAIN <= tgt_end < CUTOFF_VAL):
                         continue
-                else:  # 'test'
+                else:
                     if not (tgt_end >= CUTOFF_VAL):
                         continue
 
-                # target window must be fully observed in RAW y
                 tgt_window = y[r_begin:r_end]
                 if np.isnan(tgt_window).any():
                     continue
 
-                # inputs must be finite after standardization
                 enc_window = X[s:s_end]
                 if not np.isfinite(enc_window).all():
                     continue
 
                 self.index_pairs.append((i, s))
-
-        # Debug counts (can be commented out later)
-        # print(f"{self.flag} windows: {len(self.index_pairs)}")
 
         self.C_total = len(self.cov_cols) + 1
 
@@ -174,27 +236,40 @@ class Dataset_PanelCov(Dataset):
 
     def __getitem__(self, idx):
         ent, s = self.index_pairs[idx]
-        s_end = s + self.seq_len
+        s_end   = s + self.seq_len
         r_begin = s_end - self.label_len
-        r_end = s_end + self.pred_len
+        r_end   = s_end + self.pred_len
 
-        X = self.series_X[ent]                # standardized
-        y_raw = self.series_y_raw[ent]        # raw
-        seq_x = X[s:s_end]                    # [seq_len, C_total]
+        X     = self.series_X[ent]                # standardized
+        y_raw = self.series_y_raw[ent]           # raw
+        d     = self.series_dates[ent]
+        seq_x = X[s:s_end]                        # [seq_len, C_total]
 
-        # ---- STANDARDIZE TARGETS to match model output scale
+        # STANDARDIZE TARGETS to match model output scale
         y_target = y_raw[r_begin:r_end]
         y_target_std = ((y_target - self.y_mean_) / self.y_scale_)[:, None]  # [T,1]
 
+        # simple zeros for marks (you can enhance later)
         x_mark = torch.zeros((self.token_num, 1), dtype=torch.float32)
         y_mark = torch.zeros((self.token_num, 1), dtype=torch.float32)
 
-        # final sanity (avoid hidden nans)
-        seq_x = np.nan_to_num(seq_x, nan=0.0, posinf=1e6, neginf=-1e6)
-        y_target_std = np.nan_to_num(y_target_std, nan=0.0, posinf=1e6, neginf=-1e6)
+        # TEXT as of encoder end
+        permno = self.series_ids[ent]
+        enc_end_date = d[s_end - 1]
+        text_payload = self._lookup_text_for(permno, enc_end_date)
 
-        return seq_x.astype(np.float32), y_target_std.astype(np.float32), x_mark, y_mark
+        # sanitize numeric arrays
+        seq_x = np.nan_to_num(seq_x, nan=0.0, posinf=1e6, neginf=-1e6).astype(np.float32)
+        y_target_std = np.nan_to_num(y_target_std, nan=0.0, posinf=1e6, neginf=-1e6).astype(np.float32)
 
+        if self.text_mode == 'emb':
+            text_payload = np.nan_to_num(text_payload, nan=0.0, posinf=1e6, neginf=-1e6).astype(np.float32)
+            return seq_x, y_target_std, x_mark, y_mark, text_payload
+        else:
+            # dict of LongTensors
+            return seq_x, y_target_std, x_mark, y_mark, text_payload
+
+    # Helper to invert scaling of the last channel
     def inverse_transform_y(self, arr_last_channel):
         if self.scaler is None:
             return arr_last_channel
