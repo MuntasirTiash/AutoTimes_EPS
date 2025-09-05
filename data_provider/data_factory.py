@@ -97,6 +97,9 @@ def data_provider(args, flag):
             time_col=args.panel_time_col,
             y_col=args.panel_y_col,
             cov_cols=[c.strip() for c in args.panel_cov_cols.split(',')] if args.panel_cov_cols else None,
+            text_index_csv=args.panel_text_index_csv,
+            text_default_dim=args.panel_text_dim,
+            text_mode=args.panel_text_mode,
         )
 
     data_set = Data(**kw)

@@ -18,6 +18,7 @@ python -u run.py \
   --mlp_hidden_dim 512 \
   --cosine \
   --tmax 10 \
+  --llm_ckp_dir /ssd1/muntasir/Desktop/AutoTimes/llama-7b \
   --weight_decay 0.00001
 
 python -u run.py \
