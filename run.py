@@ -1,149 +1,99 @@
+# run.py
 import argparse
 import os
-import random
-import numpy as np
 import torch
-import torch.distributed as dist
+import numpy as np
+import random
 from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
-from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
-from exp.exp_zero_shot_forecasting import Exp_Zero_Shot_Forecast
-from exp.exp_in_context_forecasting import Exp_In_Context_Forecast
+
+def fix_seeds(seed=2024):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+def main():
+    parser = argparse.ArgumentParser(description='AutoTimes + LLaMA with text fusion')
+
+    # ---------------- core data/model args ----------------
+    parser.add_argument('--model', type=str, default='AutoTimes_Llama')
+    parser.add_argument('--data', type=str, default='panel_cov')
+    parser.add_argument('--root_path', type=str, required=True)
+    parser.add_argument('--data_path', type=str, required=True)
+
+    parser.add_argument('--seq_len', type=int, default=36)
+    parser.add_argument('--label_len', type=int, default=32)
+    parser.add_argument('--token_len', type=int, default=4)
+
+    parser.add_argument('--test_seq_len', type=int, default=36)
+    parser.add_argument('--test_label_len', type=int, default=32)
+    parser.add_argument('--test_pred_len', type=int, default=4)
+
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--learning_rate', type=float, default=1e-3)
+    parser.add_argument('--train_epochs', type=int, default=10)
+    parser.add_argument('--tmax', type=int, default=10)
+    parser.add_argument('--weight_decay', type=float, default=0.0)
+    parser.add_argument('--dropout', type=float, default=0.1)
+    parser.add_argument('--mlp_hidden_dim', type=int, default=256)
+    parser.add_argument('--mlp_hidden_layers', type=int, default=2)
+    parser.add_argument('--mlp_activation', type=str, default='gelu')
+
+    parser.add_argument('--use_amp', action='store_true', default=False)
+    parser.add_argument('--use_multi_gpu', action='store_true', default=False)
+    parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument('--gpu', type=str, default='cuda:0')
+
+    parser.add_argument('--cosine', action='store_true', default=False)
+    parser.add_argument('--checkpoints', type=str, default='./checkpoints')
+    parser.add_argument('--visualize', action='store_true', default=False)
+    parser.add_argument('--patience', type=int, default=5, help='epochs with no improvement before early stop')
+
+    # ---------------- panel_cov specific ----------------
+    parser.add_argument('--panel_id_col', type=str, default='PERMNO')
+    parser.add_argument('--panel_time_col', type=str, default='DATE')
+    parser.add_argument('--panel_y_col', type=str, default='actual')
+    parser.add_argument('--panel_cov_cols', type=str, default='')  # comma-separated; empty -> infer
+    parser.add_argument('--drop_short', action='store_true', default=False)
+    parser.add_argument('--seasonal_patterns', type=str, default=None)
+
+    # ---------------- LLaMA backbone ----------------
+    parser.add_argument('--llama_model_name', type=str, default='/ssd1/muntasir/Desktop/AutoTimes/llama-7b')
+    parser.add_argument('--llama_dtype', type=str, default='float32')  # float32|float16|bfloat16
+    parser.add_argument('--freeze_llama', action='store_true', default=True)
+    parser.add_argument('--llama_grad_ckpt', action='store_true', default=False)
+    parser.add_argument('--hidden_dim_of_gpt2', type=int, default=4096)  # keep equal to LLaMA-7B
+
+    # ---------------- Text fusion ----------------
+    parser.add_argument('--use_text', action='store_true', default=False)
+    parser.add_argument('--text_mode', type=str, default='emb', choices=['emb', 'ids'])
+    parser.add_argument('--text_dim', type=int, default=4096)            # for 'emb' mode
+    parser.add_argument('--text_index_csv', type=str, default=None)      # PERMNO,FILING_DATE,EMB_PATH
+    parser.add_argument('--text_ids_index_csv', type=str, default=None)  # PERMNO,FILING_DATE,NPZ_PATH
+
+    # ---------------- test/infer ----------------
+    parser.add_argument('--test_dir', type=str, default=None)
+    parser.add_argument('--test_file_name', type=str, default=None)
+
+    args = parser.parse_args()
+    fix_seeds(2024)
+
+    # ------------- derive token_num for marks -------------
+    args.token_num = args.seq_len // max(1, args.token_len)
+
+    # ------------- pack panel_cov options for data_provider -------------
+    # data_provider reads args.* directly; ensure they exist
+    args.panel_text_index_csv = args.text_index_csv if args.text_mode == 'emb' else args.text_ids_index_csv
+    args.panel_text_mode = args.text_mode
+    args.panel_text_dim = args.text_dim
+
+    # ------------- run experiment -------------
+    setting = f"long_term_forecast_PANELCOV_{args.seq_len}_{args.token_len}_{args.model}"
+    exp = Exp_Long_Term_Forecast(args)
+    print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
+    exp.train(setting)
+    print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
+    exp.test(setting)
 
 if __name__ == '__main__':
-    fix_seed = 2021
-    random.seed(fix_seed)
-    torch.manual_seed(fix_seed)
-    np.random.seed(fix_seed)
-
-    parser = argparse.ArgumentParser(description='AutoTimes')
-
-    # basic config
-    parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast',
-                        help='task name, options:[long_term_forecast, short_term_forecast, zero_shot_forecasting, in_context_forecasting]')
-    parser.add_argument('--is_training', type=int, required=True, default=1, help='status')
-    parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
-    parser.add_argument('--model', type=str, required=True, default='AutoTimes_Llama',
-                        help='model name, options: [AutoTimes_Llama, AutoTimes_Gpt2, AutoTimes_Opt1b]')
-
-    # data loader
-    parser.add_argument('--data', type=str, required=True, default='ETTm1', help='dataset type')
-    parser.add_argument('--root_path', type=str, default='./data/ETT/', help='root path of the data file')
-    parser.add_argument('--data_path', type=str, default='ETTh1.csv', help='data file')
-    parser.add_argument('--test_data_path', type=str, default='ETTh1.csv', help='test data file used in zero shot forecasting')
-    parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
-    parser.add_argument('--drop_last',  action='store_true', default=False, help='drop last batch in data loader')
-    parser.add_argument('--val_set_shuffle', action='store_false', default=True, help='shuffle validation set')
-    parser.add_argument('--drop_short', action='store_true', default=False, help='drop too short sequences in dataset')
-
-    # forecasting task
-    parser.add_argument('--seq_len', type=int, default=672, help='input sequence length')
-    parser.add_argument('--label_len', type=int, default=576, help='label length')
-    parser.add_argument('--token_len', type=int, default=96, help='token length')
-    parser.add_argument('--test_seq_len', type=int, default=672, help='test seq len')
-    parser.add_argument('--test_label_len', type=int, default=576, help='test label len')
-    parser.add_argument('--test_pred_len', type=int, default=96, help='test pred len')
-    parser.add_argument('--seasonal_patterns', type=str, default='Monthly', help='subset for M4')
-
-    # model define
-    parser.add_argument('--dropout', type=float, default=0.1, help='dropout')
-    parser.add_argument('--llm_ckp_dir', type=str, default='./llama', help='llm checkpoints dir')
-    parser.add_argument('--mlp_hidden_dim', type=int, default=256, help='mlp hidden dim')
-    parser.add_argument('--mlp_hidden_layers', type=int, default=2, help='mlp hidden layers')
-    parser.add_argument('--mlp_activation', type=str, default='tanh', help='mlp activation')
-
-    # optimization
-    parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
-    parser.add_argument('--itr', type=int, default=1, help='experiments times')
-    parser.add_argument('--train_epochs', type=int, default=10, help='train epochs')
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
-    parser.add_argument('--patience', type=int, default=3, help='early stopping patience')
-    parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
-    parser.add_argument('--des', type=str, default='test', help='exp description')
-    parser.add_argument('--loss', type=str, default='MSE', help='loss function')
-    parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
-    parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
-    parser.add_argument('--cosine', action='store_true', help='use cosine annealing lr', default=False)
-    parser.add_argument('--tmax', type=int, default=10, help='tmax in cosine anealing lr')
-    parser.add_argument('--weight_decay', type=float, default=0)
-    parser.add_argument('--mix_embeds', action='store_true', help='mix embeds', default=False)
-    parser.add_argument('--test_dir', type=str, default='./test', help='test dir')
-    parser.add_argument('--test_file_name', type=str, default='checkpoint.pth', help='test file')
-    
-    # GPU
-    parser.add_argument('--gpu', type=int, default=0, help='gpu')
-    parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
-    parser.add_argument('--visualize', action='store_true', help='visualize', default=False)
-    args = parser.parse_args()
-
-    if args.use_multi_gpu:
-        ip = os.environ.get("MASTER_ADDR", "127.0.0.1")
-        port = os.environ.get("MASTER_PORT", "64209")
-        hosts = int(os.environ.get("WORLD_SIZE", "8"))
-        rank = int(os.environ.get("RANK", "0")) 
-        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-        gpus = torch.cuda.device_count()
-        args.local_rank = local_rank
-        print(ip, port, hosts, rank, local_rank, gpus)
-        dist.init_process_group(backend="nccl", init_method=f"tcp://{ip}:{port}", world_size=hosts,
-                                rank=rank)
-        torch.cuda.set_device(local_rank)
-    
-    if args.task_name == 'long_term_forecast':
-        Exp = Exp_Long_Term_Forecast
-    elif args.task_name == 'short_term_forecast':
-        Exp = Exp_Short_Term_Forecast
-    elif args.task_name == 'zero_shot_forecast':
-        Exp = Exp_Zero_Shot_Forecast
-    elif args.task_name == 'in_context_forecast':
-        Exp = Exp_In_Context_Forecast
-    else:
-        Exp = Exp_Long_Term_Forecast
-
-    if args.is_training:
-        for ii in range(args.itr):
-            # setting record of experiments
-            exp = Exp(args)  # set experiments
-            setting = '{}_{}_{}_{}_sl{}_ll{}_tl{}_lr{}_bt{}_wd{}_hd{}_hl{}_cos{}_mix{}_{}_{}'.format(
-                args.task_name,
-                args.model_id,
-                args.model,
-                args.data,
-                args.seq_len,
-                args.label_len,
-                args.token_len,
-                args.learning_rate,
-                args.batch_size,
-                args.weight_decay,
-                args.mlp_hidden_dim,
-                args.mlp_hidden_layers,
-                args.cosine,
-                args.mix_embeds,
-                args.des, ii)
-            if (args.use_multi_gpu and args.local_rank == 0) or not args.use_multi_gpu:
-                print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
-            exp.train(setting)
-            if (args.use_multi_gpu and args.local_rank == 0) or not args.use_multi_gpu:
-                print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-            exp.test(setting)
-            torch.cuda.empty_cache()
-    else:
-        ii = 0
-        setting = '{}_{}_{}_{}_sl{}_ll{}_tl{}_lr{}_bt{}_wd{}_hd{}_hl{}_cos{}_mix{}_{}_{}'.format(
-            args.task_name,
-            args.model_id,
-            args.model,
-            args.data,
-            args.seq_len,
-            args.label_len,
-            args.token_len,
-            args.learning_rate,
-            args.batch_size,
-            args.weight_decay,
-            args.mlp_hidden_dim,
-            args.mlp_hidden_layers,
-            args.cosine,
-            args.mix_embeds,
-            args.des, ii)
-        exp = Exp(args)  # set experiments
-        exp.test(setting, test=1)
-        torch.cuda.empty_cache()
+    main()
