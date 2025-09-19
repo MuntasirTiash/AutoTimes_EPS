@@ -142,3 +142,4 @@ dmypy.json
 /models--gpt2/
 /models--facebook--opt-1.3b/
 /llama-7b/
+runs_panel/checkpoints/
