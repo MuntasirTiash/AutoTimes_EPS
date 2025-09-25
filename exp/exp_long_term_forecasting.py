@@ -242,6 +242,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return self.model
 
     def test(self, setting, test=0):
+        import pandas as pd
+
         test_data, test_loader = self._get_data(flag='test')
 
         print("info:", self.args.test_seq_len, self.args.test_label_len, self.args.token_len, self.args.test_pred_len)
@@ -254,6 +256,9 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             self.model.load_state_dict({k.replace('module.', ''): v for k, v in load_item.items()}, strict=False)
 
         preds, trues = [], []
+        meta_ids = []
+        meta_dates = []
+
         folder_path = './test_results/' + setting + '/'
         os.makedirs(folder_path, exist_ok=True)
         time_now = time.time()
@@ -276,7 +281,6 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # how many autoregressive steps do we need
                 inference_steps = self.args.test_pred_len // self.args.token_len
                 dis = self.args.test_pred_len - inference_steps * self.args.token_len
                 if dis != 0:
@@ -285,31 +289,33 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 pred_y = []
                 for j in range(inference_steps):
                     if len(pred_y) != 0:
-                        # shift encoder window and marks by one token, append last predicted token
                         batch_x = torch.cat([batch_x[:, self.args.token_len:, :], pred_y[-1]], dim=1)
                         tmp = batch_y_mark[:, j-1:j, :]
                         batch_x_mark = torch.cat([batch_x_mark[:, 1:, :], tmp], dim=1)
 
                     outputs = self.model(batch_x, batch_x_mark, x_dec, batch_y_mark)
-                    # take the last token_len steps from the model output
                     pred_y.append(outputs[:, -self.args.token_len:, :])
 
-                # concat all predicted tokens along time
-                pred_y = torch.cat(pred_y, dim=1)  # [B, steps*token_len, C]
+                pred_y = torch.cat(pred_y, dim=1)
                 if dis != 0:
                     pred_y = pred_y[:, :-(self.args.token_len - dis), :]
 
-                # align ground-truth
                 batch_y = batch_y[:, -self.args.test_pred_len:, :]
+                outputs_y = pred_y[:, :, -1:]
 
-                # pick last channel
-                outputs_y = pred_y[:, :, -1:]  # [B, T_pred, 1]
+                pred = outputs_y.detach().cpu().numpy()
+                true = batch_y.detach().cpu().numpy()
 
-                pred = outputs_y.detach().cpu()
-                true = batch_y.detach().cpu()
+                preds.extend(pred)
+                trues.extend(true)
 
-                preds.append(pred)
-                trues.append(true)
+                start_idx = i * self.args.batch_size
+                end_idx = min((i + 1) * self.args.batch_size, len(test_loader.dataset.index_pairs))
+                for ent, s in test_loader.dataset.index_pairs[start_idx:end_idx]:
+                    permno = test_data.series_ids[ent]
+                    tgt_start = test_data.series_dates[ent][s + self.args.seq_len - self.args.label_len]
+                    meta_ids.append(permno)
+                    meta_dates.append(str(tgt_start))
 
                 if (i + 1) % 100 == 0:
                     if (self.args.use_multi_gpu and self.args.local_rank == 0) or not self.args.use_multi_gpu:
@@ -320,8 +326,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         time_now = time.time()
 
                 if self.args.visualize and i == 0:
-                    gt = np.array(true[0, :, 0])
-                    pd = np.array(pred[0, :, 0])
+                    gt = true[0, :, 0]
+                    pd = pred[0, :, 0]
                     lookback = batch_x[0, :, -1].detach().cpu().numpy()
                     gt = np.concatenate([lookback, gt], axis=0)
                     pd = np.concatenate([lookback, pd], axis=0)
@@ -329,16 +335,29 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     os.makedirs(dir_path, exist_ok=True)
                     visual(gt, pd, os.path.join(dir_path, f'{i}.png'))
 
-        preds = torch.cat(preds, dim=0).numpy()
-        trues = torch.cat(trues, dim=0).numpy()
+        preds = np.array(preds)
+        trues = np.array(trues)
+
         np.save(os.path.join(folder_path, 'predictions.npy'), preds)
         np.save(os.path.join(folder_path, 'ground_truth.npy'), trues)
+        np.save(os.path.join(folder_path, 'meta_ids.npy'), np.array(meta_ids))
+        np.save(os.path.join(folder_path, 'meta_dates.npy'), np.array(meta_dates))
 
+        # --- Save results_with_meta.csv ---
+        df_out = pd.DataFrame({
+            'GVKEY': meta_ids,
+            'TGT_START': meta_dates,
+            'GROUND_TRUTH': [x.flatten().tolist() for x in trues],
+            'PREDICTIONS': [x.flatten().tolist() for x in preds],
+        })
+        df_out.to_csv(os.path.join(folder_path, 'results_with_meta.csv'), index=False)
+        print(f"Saved: {os.path.join(folder_path, 'results_with_meta.csv')}")
+
+        # --- Metrics ---
         mae, mse, rmse, mape, mspe, r2, kelly_r2 = metric(preds, trues)
         print(f"MSE: {mse:.4f}  MAE: {mae:.4f}  R²: {r2:.4f}  Kelly R²: {kelly_r2:.4f}")
         with open("result_long_term_forecast.txt", 'a') as f:
             f.write(setting + "  \n")
             f.write('mse:{}, mae:{}, r2:{}, kelly_r2:{}'.format(mse, mae, r2, kelly_r2))
             f.write('\n\n')
-        return
 

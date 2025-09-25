@@ -11,7 +11,7 @@ LLAMA_DIR="/ssd1/muntasir/Desktop/AutoTimes/llama-7b"
 GPU_ID="${GPU_ID:-0}"   # 0 or 1
 SEQ_LEN=36; LABEL_LEN=32; TOKEN_LEN=4
 TEST_SEQ_LEN=36; TEST_LABEL_LEN=32; TEST_PRED_LEN=4
-BATCH=2; EPOCHS=5; LR=1e-3
+BATCH=2; EPOCHS=7; LR=1e-3
 TEXT_DIM="${TEXT_DIM:-4096}"
 
 # Which runs to execute (space-separated): "no_text with_text" | "no_text" | "with_text"
@@ -97,8 +97,10 @@ run_one () {
 
   # Freshen the repo's test output folder so we know what we copy
   rm -rf "${TR_FOLDER}"
-
+  echo "ARGS PASSED TO PYTHON:"
+  printf '%s\n' "${args[@]}"
   CUDA_VISIBLE_DEVICES="${GPU_ID}" python -u run.py "${args[@]}" 2>&1 | tee "${log}"
+
 
   # Package artifacts from this run
   local dest="${RES_DIR}/$(timestamp)_${tag}"
