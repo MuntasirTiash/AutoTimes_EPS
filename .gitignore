@@ -143,4 +143,8 @@ dmypy.json
 /models--facebook--opt-1.3b/
 /llama-7b/
 runs_panel/checkpoints/
-*.pth*.pth
+*.pth
+*.pt
+*.zip
+*.npz
+*.npy
