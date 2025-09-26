@@ -60,9 +60,9 @@ def pick_device(gpu_arg: str) -> torch.device:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--csv",
-                   default="/ssd1/muntasir/Desktop/AutoTimes/dataset/panel/10-Q/dow_executive_summaries_10Q_with_gvkey.csv")
+                   default="/ssd1/muntasir/Desktop/AutoTimes/dataset/panel/10-Q/nasdow_executive_summaries_10Q_with_gvkey.csv")
     p.add_argument("--out_dir",
-                   default="/ssd1/muntasir/Desktop/AutoTimes/dataset/panel/10-Q/embeddings_llama")
+                   default="/ssd1/muntasir/Desktop/AutoTimes/dataset/panel/10-Q/embeddings_nasdow")
     p.add_argument("--llm_ckp_dir",
                    default="/ssd1/muntasir/Desktop/AutoTimes/llama-7b")
     p.add_argument("--gpu", default="cuda:0")  # also accepts "cpu"
