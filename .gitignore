@@ -148,3 +148,4 @@ runs_panel/checkpoints/
 *.zip
 *.npz
 *.npy
+/.models

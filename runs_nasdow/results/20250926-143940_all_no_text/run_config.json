@@ -1,0 +1,12 @@
+{
+  "group": "all",
+  "text": false,
+  "n_features": 55,
+  "features": "CAPEI,GProf,accrual,adv_sale,aftret_eq,aftret_equity,aftret_invcapx,at_turn,bm,capital_ratio,cash_debt,cash_lt,cash_ratio,cfm,curr_debt,curr_ratio,de_ratio,debt_assets,debt_at,debt_capital,debt_ebitda,debt_invcap,dltt_be,equity_invcap,evm,gpm,invt_act,lt_debt,lt_ppent,npm,ocf_lct,opmad,opmbd,pay_turn,pe_exi,pe_inc,pe_op_basic,pretret_earnat,pretret_noa,profit_lct,ps,ptb,ptpm,quick_ratio,rd_sale,rect_act,rect_turn,roa,roce,roe,sale_equity,sale_invcap,short_debt,staff_sale,totdebt_invcap",
+  "id_col": "gvkey", "time_col": "DATE", "y_col": "actual",
+  "root_path": "/largessd/home/muntasir/Desktop/LLM/AutoTimes_EPS/dataset/panel", "data_csv": "panel_gvkey_nasdow.csv",
+  "llama_dir": "/largessd/home/muntasir/Desktop/LLM/AutoTimes_EPS/.models/llama-3.1-8b",
+  "seq_len": 36, "label_len": 32, "token_len": 4,
+  "test_seq_len": 36, "test_label_len": 32, "test_pred_len": 4,
+  "batch_size": 4, "epochs": 7, "lr": 1e-3
+}

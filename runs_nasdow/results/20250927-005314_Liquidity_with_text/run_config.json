@@ -1,0 +1,13 @@
+{
+  "group": "Liquidity",
+  "text": true,
+  "n_features": 11,
+  "features": "cash_debt,cash_lt,cash_ratio,cfm,curr_debt,curr_ratio,debt_ebitda,ocf_lct,profit_lct,quick_ratio,short_debt",
+  "id_col": "gvkey", "time_col": "DATE", "y_col": "actual",
+  "root_path": "/largessd/home/muntasir/Desktop/LLM/AutoTimes_EPS/dataset/panel", "data_csv": "panel_gvkey_nasdow.csv",
+  "llama_dir": "/largessd/home/muntasir/Desktop/LLM/AutoTimes_EPS/.models/llama-3.1-8b",
+  "text_index_csv": "/largessd/home/muntasir/Desktop/LLM/AutoTimes_EPS/dataset/panel/10-Q/embeddings_nasdow/gvkey_text_index.csv", "text_dim": 4096,
+  "seq_len": 36, "label_len": 32, "token_len": 4,
+  "test_seq_len": 36, "test_label_len": 32, "test_pred_len": 4,
+  "batch_size": 8, "epochs": 7, "lr": 1e-3
+}

@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Embed 10-Q executive summaries with a LLaMA checkpoint using HF AutoTokenizer + AutoModel.
+
+Key changes vs your original:
+- No repo-local wrapper; avoids slow LlamaTokenizer / SentencePiece issues.
+- Uses AutoTokenizer (fast) and AutoModel (base) so .last_hidden_state is available.
+- Chooses dtype automatically (bf16 on GPUs that support it, else fp16; cpu uses fp32).
+- Ensures pad token is set; uses right padding so "last non-pad" pooling is correct.
+"""
+
 import os, argparse, re
 import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
-from types import SimpleNamespace
-
-# Repo-local: wrapper that exposes .llama_tokenizer and .llama.model
-from models.Preprocess_Llama import Model as LlamaEmbedder  # repo-local
-
 
 # ---------------------------
 # Utilities
@@ -28,7 +35,6 @@ def parse_dates_robust(series: pd.Series) -> pd.Series:
     Returns: series of 'YYYY-MM-DD' strings; NaT rows become NaN (drop later).
     """
     s = series.astype(str).str.strip()
-
     dt = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
 
     mask_8  = s.str.fullmatch(r"\d{8}")     # 20180510
@@ -37,7 +43,6 @@ def parse_dates_robust(series: pd.Series) -> pd.Series:
     mask_else = ~(mask_8 | mask_10 | mask_13)
 
     dt.loc[mask_8]  = pd.to_datetime(s.loc[mask_8],  format="%Y%m%d", errors="coerce")
-    # cast to int64 safely; non-numeric to NaT
     if mask_10.any():
         sec = pd.to_numeric(s.loc[mask_10], errors="coerce")
         dt.loc[mask_10] = pd.to_datetime(sec, unit="s", errors="coerce")
@@ -53,6 +58,12 @@ def pick_device(gpu_arg: str) -> torch.device:
         return torch.device(gpu_arg)
     return torch.device("cpu")
 
+def choose_dtype(device: torch.device):
+    if device.type == "cuda":
+        # Prefer bf16 if supported; else fp16
+        return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    return torch.float32
+
 
 # ---------------------------
 # Main
@@ -60,11 +71,11 @@ def pick_device(gpu_arg: str) -> torch.device:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--csv",
-                   default="/ssd1/muntasir/Desktop/AutoTimes/dataset/panel/10-Q/nasdow_executive_summaries_10Q_with_gvkey.csv")
+                   default="/largessd/home/muntasir/Desktop/LLM/AutoTimes_EPS/dataset/panel/10-Q/nasdow_executive_summaries_10Q_with_gvkey.csv")
     p.add_argument("--out_dir",
-                   default="/ssd1/muntasir/Desktop/AutoTimes/dataset/panel/10-Q/embeddings_nasdow")
+                   default="/largessd/home/muntasir/Desktop/LLM/AutoTimes_EPS/dataset/panel/10-Q/embeddings_nasdow")
     p.add_argument("--llm_ckp_dir",
-                   default="/ssd1/muntasir/Desktop/AutoTimes/llama-7b")
+                   default="/largessd/home/muntasir/Desktop/LLM/AutoTimes_EPS/.models/llama-3.1-8b")
     p.add_argument("--gpu", default="cuda:0")  # also accepts "cpu"
     p.add_argument("--batch_size", type=int, default=4)
     p.add_argument("--max_length", type=int, default=2048)  # reduce if OOM
@@ -88,6 +99,9 @@ def main():
 
     # tolerate 'execute_summary' typo
     if args.text_col not in df.columns and "execute_summary" in df.columns:
+        args.text_col = "execute_summary"
+    if args.text_col not in df.columns and "execute_summary".replace("c", "") in df.columns:
+        # try 'ex*ute_summary' typo just in case
         args.text_col = "execute_summary"
 
     needed = [args.id_col, args.date_col, args.text_col]
@@ -130,20 +144,34 @@ def main():
     # safety: ensure sorted (nice for deterministic batches and index CSV)
     df = df.sort_values([args.id_col, args.date_col]).reset_index(drop=True)
 
-    # --------------- LLaMA init ---------------
+    # --------------- LLaMA init (AutoTokenizer + AutoModel) ---------------
+    from transformers import AutoTokenizer, AutoModel  # import here to keep header clean
+
     device = pick_device(args.gpu)
-    print(f"[device] using {device}")
+    dtype = choose_dtype(device)
+    print(f"[device] using {device} | dtype={dtype}")
 
-    cfg = SimpleNamespace(gpu=args.gpu, llm_ckp_dir=args.llm_ckp_dir)
-    llama = LlamaEmbedder(cfg)  # exposes .llama_tokenizer and .llama.model
-    tokenizer = llama.llama_tokenizer
-    backbone = llama.llama.model  # transformer module (HF)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.llm_ckp_dir,
+        use_fast=True,
+        trust_remote_code=True,   # harmless if not needed
+    )
+    # Ensure a pad token exists for batching and set right padding so "last" pooling works
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
 
-    # place model on device; safe-guard if wrapper hasn’t already moved it
+    # Base transformer (no LM head) so we get .last_hidden_state directly
+    backbone = AutoModel.from_pretrained(
+        args.llm_ckp_dir,
+        dtype=dtype,                  # replaces deprecated torch_dtype
+        low_cpu_mem_usage=True,
+        trust_remote_code=True,
+    )
     try:
         backbone.to(device)
     except Exception as e:
-        print(f"[warn] could not move model to device ({e}); proceeding")
+        print(f"[warn] could not move model to device ({e}); proceeding where it fits")
 
     backbone.eval()
 
@@ -164,13 +192,12 @@ def main():
         returns: [B,H]
         """
         if mode == "last":
+            # Sum of mask per row gives effective length (non-pad tokens)
             last_idx = (attn_mask.sum(dim=1) - 1).clamp(min=0)  # [B]
             b_idx = torch.arange(last_hidden_state.size(0), device=last_hidden_state.device)
             return last_hidden_state[b_idx, last_idx, :]  # [B,H]
         else:  # "mean" (masked)
-            # avoid division by zero
             lens = attn_mask.sum(dim=1).clamp(min=1).unsqueeze(-1)  # [B,1]
-            # mask pads to zero, then mean
             masked = last_hidden_state * attn_mask.unsqueeze(-1)
             return masked.sum(dim=1) / lens  # [B,H]
 
@@ -186,11 +213,10 @@ def main():
                 max_length=min(args.max_length, getattr(tokenizer, "model_max_length", args.max_length))
             )
             # move to device
-            for k in enc:
-                enc[k] = enc[k].to(device)
+            enc = {k: v.to(device) for k, v in enc.items()}
 
             # forward -> last hidden states [B, T, H]
-            out = backbone(**enc).last_hidden_state  # dtype may be fp16 on GPU
+            out = backbone(**enc).last_hidden_state
             pooled = pool_hidden(out, enc["attention_mask"], args.pool)  # [B,H]
 
             # move to cpu/float32 for saving
@@ -211,6 +237,11 @@ def main():
                     "FILING_DATE": d,
                     "EMB_PATH": fpath
                 })
+
+            # small memory hygiene on long runs
+            del enc, out, pooled
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
     # --------------- Write index CSV ---------------
     index_df = pd.DataFrame(rows).sort_values(["PERMNO", "FILING_DATE"]).reset_index(drop=True)
