@@ -72,6 +72,16 @@ def download(url: str, file_path: str) -> None:
 
 @dataclass()
 class M4Dataset:
+    """M4 Dataset.
+
+    Attributes:
+        ids (np.ndarray): The M4 identifiers of the time series.
+        groups (np.ndarray): The seasonal patterns of the time series.
+        frequencies (np.ndarray): The frequencies of the time series.
+        horizons (np.ndarray): The forecast horizons of the time series.
+        values (np.ndarray): The values of the time series.
+    """
+
     ids: np.ndarray
     groups: np.ndarray
     frequencies: np.ndarray
@@ -100,6 +110,23 @@ class M4Dataset:
 
 @dataclass()
 class M4Meta:
+    """Metadata for the M4 dataset.
+
+    Attributes:
+        seasonal_patterns (list[str]): A list of the seasonal patterns in the
+            M4 dataset.
+        horizons (list[int]): A list of the forecast horizons corresponding to
+            the seasonal patterns.
+        frequencies (list[int]): A list of the frequencies corresponding to the
+            seasonal patterns.
+        horizons_map (dict[str, int]): A dictionary mapping seasonal patterns
+            to their forecast horizons.
+        frequency_map (dict[str, int]): A dictionary mapping seasonal patterns
+            to their frequencies.
+        history_size (dict[str, float]): A dictionary mapping seasonal
+            patterns to their history sizes.
+    """
+
     seasonal_patterns = ['Yearly', 'Quarterly', 'Monthly', 'Weekly', 'Daily', 'Hourly']
     horizons = [6, 8, 18, 13, 14, 48]
     frequencies = [1, 4, 12, 1, 1, 24]

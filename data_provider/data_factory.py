@@ -70,6 +70,26 @@ data_dict = {
 #     return data_set, data_loader
 
 def data_provider(args, flag):
+    """Provides a dataset and data loader for time series forecasting.
+
+    This function selects the appropriate dataset class based on the provided
+    arguments, initializes the dataset with the specified configuration, and
+    creates a DataLoader for iterating over the data.
+
+    Args:
+        args: An object containing configuration arguments. Expected attributes
+            include `data`, `root_path`, `data_path`, `seq_len`, `label_len`,
+            `token_len`, `test_seq_len`, `test_label_len`, `test_pred_len`,
+            `seasonal_patterns`, `drop_short`, `batch_size`, `num_workers`,
+            and potentially panel-specific arguments.
+        flag: A string indicating the dataset split, one of 'train', 'val',
+            or 'test'.
+
+    Returns:
+        A tuple containing:
+        - data_set: The initialized Dataset object.
+        - data_loader: The configured DataLoader for the dataset.
+    """
     Data = data_dict[args.data]
     if flag in ['train', 'val']:
         kw = dict(

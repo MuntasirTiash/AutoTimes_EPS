@@ -13,6 +13,24 @@ warnings.filterwarnings('ignore')
 
 
 class Dataset_ETT_hour(Dataset):
+    """Dataset for the Electricity Transformer Temperature (ETT) hourly dataset.
+
+    Args:
+        root_path (str): Root directory of the data.
+        flag (str, optional): One of 'train', 'val', or 'test'.
+            Defaults to 'train'.
+        size (list[int], optional): A list of three integers:
+            [sequence length, label length, prediction length].
+            Defaults to None.
+        data_path (str, optional): The name of the data file.
+            Defaults to 'ETTh1.csv'.
+        scale (bool, optional): Whether to scale the data. Defaults to True.
+        seasonal_patterns (str, optional): The seasonal patterns of the data.
+            Not used in this class. Defaults to None.
+        drop_short (bool, optional): Whether to drop short time series.
+            Not used in this class. Defaults to False.
+    """
+
     def __init__(self, root_path, flag='train', size=None, data_path='ETTh1.csv',
                  scale=True, seasonal_patterns=None, drop_short=False):
         self.seq_len = size[0]
@@ -81,6 +99,24 @@ class Dataset_ETT_hour(Dataset):
         return self.scaler.inverse_transform(data)
 
 class Dataset_Custom(Dataset):
+    """Custom dataset for time series forecasting.
+
+    Args:
+        root_path (str): Root directory of the data.
+        flag (str, optional): One of 'train', 'val', or 'test'.
+            Defaults to 'train'.
+        size (list[int], optional): A list of three integers:
+            [sequence length, label length, prediction length].
+            Defaults to None.
+        data_path (str, optional): The name of the data file.
+            Defaults to 'ETTh1.csv'.
+        scale (bool, optional): Whether to scale the data. Defaults to True.
+        seasonal_patterns (str, optional): The seasonal patterns of the data.
+            Not used in this class. Defaults to None.
+        drop_short (bool, optional): Whether to drop short time series.
+            Not used in this class. Defaults to False.
+    """
+
     def __init__(self, root_path, flag='train', size=None, data_path='ETTh1.csv',
                  scale=True, seasonal_patterns=None, drop_short=False):
         self.seq_len = size[0]
@@ -156,6 +192,24 @@ class Dataset_Custom(Dataset):
 
 
 class Dataset_Solar(Dataset):
+    """Solar power generation dataset.
+
+    Args:
+        root_path (str): Root directory of the data.
+        flag (str, optional): One of 'train', 'val', or 'test'.
+            Defaults to 'train'.
+        size (list[int], optional): A list of three integers:
+            [sequence length, label length, prediction length].
+            Defaults to None.
+        data_path (str, optional): The name of the data file.
+            Defaults to 'ETTh1.csv'.
+        seasonal_patterns (str, optional): The seasonal patterns of the data.
+            Not used in this class. Defaults to None.
+        scale (bool, optional): Whether to scale the data. Defaults to True.
+        drop_short (bool, optional): Whether to drop short time series.
+            Not used in this class. Defaults to False.
+    """
+
     def __init__(self, root_path, flag='train', size=None, data_path='ETTh1.csv',
                  seasonal_patterns=None, scale=True, drop_short=False):
         # size [seq_len, label_len, pred_len]
@@ -233,6 +287,26 @@ class Dataset_Solar(Dataset):
 
 
 class Dataset_M4(Dataset):
+    """M4 competition dataset.
+
+    Args:
+        root_path (str): Root directory of the data.
+        flag (str, optional): One of 'train', 'val', or 'test'.
+            Defaults to 'pred'.
+        size (list[int], optional): A list of three integers:
+            [sequence length, label length, prediction length].
+            Defaults to None.
+        data_path (str, optional): The name of the data file.
+            Not used in this class. Defaults to 'ETTh1.csv'.
+        scale (bool, optional): Whether to scale the data. Defaults to False.
+        inverse (bool, optional): Whether to inverse transform the data.
+            Not used in this class. Defaults to False.
+        seasonal_patterns (str, optional): The seasonal patterns of the data.
+            Defaults to 'Yearly'.
+        drop_short (bool, optional): Whether to drop short time series.
+            Not used in this class. Defaults to False.
+    """
+
     def __init__(self, root_path, flag='pred', size=None, data_path='ETTh1.csv',
                  scale=False, inverse=False, seasonal_patterns='Yearly', drop_short=False):
         self.scale = scale
@@ -305,6 +379,25 @@ class Dataset_M4(Dataset):
 
 
 class Dataset_TSF(Dataset):
+    """Time series forecasting dataset.
+
+    Args:
+        root_path (str): Root directory of the data.
+        flag (str, optional): One of 'train', 'val', or 'test'.
+            Defaults to 'train'.
+        size (list[int], optional): A list of three integers:
+            [sequence length, label length, prediction length].
+            Defaults to None.
+        data_path (str, optional): The name of the data file.
+            Defaults to None.
+        scale (bool, optional): Whether to scale the data. Not used in this
+            class. Defaults to True.
+        seasonal_patterns (str, optional): The seasonal patterns of the data.
+            Not used in this class. Defaults to None.
+        drop_short (bool, optional): Whether to drop short time series.
+            Defaults to False.
+    """
+
     def __init__(self, root_path, flag='train', size=None, data_path=None,
                  scale=True, seasonal_patterns=None, drop_short=False):
         
@@ -380,6 +473,25 @@ class Dataset_TSF(Dataset):
         return self.tot_len
 
 class Dataset_TSF_ICL(Dataset):
+    """Time series forecasting dataset for in-context learning.
+
+    Args:
+        root_path (str): Root directory of the data.
+        flag (str, optional): One of 'train', 'val', or 'test'. Not used in
+            this class. Defaults to 'train'.
+        size (list[int], optional): A list of three integers:
+            [sequence length, label length, prediction length].
+            Defaults to None.
+        data_path (str, optional): The name of the data file.
+            Defaults to None.
+        scale (bool, optional): Whether to scale the data. Not used in this
+            class. Defaults to True.
+        seasonal_patterns (str, optional): The seasonal patterns of the data.
+            Not used in this class. Defaults to None.
+        drop_short (bool, optional): Whether to drop short time series.
+            Defaults to True.
+    """
+
     def __init__(self, root_path, flag='train', size=None, data_path=None,
                  scale=True, seasonal_patterns=None, drop_short=True):
         
@@ -413,6 +525,23 @@ class Dataset_TSF_ICL(Dataset):
         return len(self.timeseries)
 
 class Dataset_Preprocess(Dataset):
+    """Dataset for preprocessing time series data.
+
+    Args:
+        root_path (str): Root directory of the data.
+        flag (str, optional): One of 'train', 'val', or 'test'.
+            Defaults to 'train'.
+        size (list[int], optional): A list of three integers:
+            [sequence length, label length, prediction length].
+            Defaults to None.
+        data_path (str, optional): The name of the data file.
+            Defaults to 'ETTh1.csv'.
+        scale (bool, optional): Whether to scale the data. Not used in this
+            class. Defaults to True.
+        seasonal_patterns (str, optional): The seasonal patterns of the data.
+            Not used in this class. Defaults to None.
+    """
+
     def __init__(self, root_path, flag='train', size=None,
                  data_path='ETTh1.csv', scale=True, seasonal_patterns=None):
         self.seq_len = size[0]

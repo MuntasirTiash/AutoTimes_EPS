@@ -9,8 +9,7 @@ from bisect import bisect_right
 
 
 class Dataset_PanelCov(Dataset):
-    """
-    Long-format panel with (DATE, PERMNO, covariates..., actual).
+    """Long-format panel with (DATE, PERMNO, covariates..., actual).
 
     Uses 55+ covariates as lagged inputs and predicts ONLY 'actual'.
     Guarantees: lookbacks come ONLY from the same PERMNO.
@@ -27,6 +26,40 @@ class Dataset_PanelCov(Dataset):
       • Covariates: forward-fill within each PERMNO (no backfill to avoid future leak).
       • 'actual' in encoder (past): forward-fill for inputs only.
       • 'actual' in target window: must be fully observed; windows with NaN target are skipped.
+
+    Args:
+        root_path (str): Root directory of the data.
+        flag (str, optional): One of 'train', 'val', or 'test'.
+            Defaults to 'train'.
+        size (list[int], optional): A list of three integers:
+            [sequence length, label length, prediction length].
+            Defaults to None.
+        data_path (str, optional): The name of the data file.
+            Defaults to None.
+        id_col (str, optional): The name of the identifier column.
+            Defaults to 'PERMNO'.
+        time_col (str, optional): The name of the time column.
+            Defaults to 'DATE'.
+        y_col (str, optional): The name of the target column.
+            Defaults to 'actual'.
+        cov_cols (list[str], optional): A list of the covariate columns.
+            If None, all columns other than id, time, and y are used.
+            Defaults to None.
+        scale (bool, optional): Whether to scale the data. Defaults to True.
+        seasonal_patterns (str, optional): The seasonal patterns of the data.
+            Not used in this class. Defaults to None.
+        drop_short (bool, optional): Whether to drop short time series.
+            Not used in this class. Defaults to False.
+        split_by (str, optional): The column to use for splitting the data.
+            Not used in this class. Defaults to 'date'.
+        require_full_x (bool, optional): Whether to require that the input
+            sequence has no missing values. Defaults to True.
+        text_index_csv (str, optional): The path to the text index CSV file.
+            Defaults to None.
+        text_default_dim (int, optional): The default dimension for text
+            embeddings. Defaults to 4096.
+        text_mode (str, optional): The mode for text data, either 'emb' for
+            embeddings or 'ids' for token IDs. Defaults to 'emb'.
     """
     def __init__(
         self,
