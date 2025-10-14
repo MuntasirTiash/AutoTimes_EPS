@@ -32,16 +32,20 @@ class Model(nn.Module):
         self.token_num   = int(getattr(configs, "token_num", 1))
 
         # ---------- TS tokenizer / detokenizer ----------
-        self.encoder = MLP(
-            self.token_len, self.hidden_size,
-            configs.mlp_hidden_dim, configs.mlp_hidden_layers,
-            configs.dropout, configs.mlp_activation
-        )
-        self.decoder = MLP(
-            self.hidden_size, self.token_len,
-            configs.mlp_hidden_dim, configs.mlp_hidden_layers,
-            configs.dropout, configs.mlp_activation
-        )
+        # This is the original AutoTimes encoder/decoder, which treats each channel independently.
+        # self.encoder = MLP(
+        #     self.token_len, self.hidden_size,
+        #     configs.mlp_hidden_dim, configs.mlp_hidden_layers,
+        #     configs.dropout, configs.mlp_activation
+        # )
+        # self.decoder = MLP(
+        #     self.hidden_size, self.token_len,
+        #     configs.mlp_hidden_dim, configs.mlp_hidden_layers,
+        #     configs.dropout, configs.mlp_activation
+        # )
+        # New encoder/decoder to process all covariates together
+        self.encoder = None  # Will be nn.Linear(C, hidden_size)
+        self.decoder = None  # Will be nn.Linear(hidden_size, 1) for target prediction
 
         # ---------- LLaMA backbone (local, offline) ----------
         llama_name = getattr(configs, "llama_model_name", "/ssd1/muntasir/Desktop/AutoTimes/llama-7b")
@@ -115,58 +119,71 @@ class Model(nn.Module):
     # -------- main path --------
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
         # x_enc: [B, T, C]  (C variables; last channel is target)
+
+        # Lazy initialization of encoder/decoder
+        if self.encoder is None:
+            C = x_enc.shape[-1]
+            self.encoder = nn.Linear(C, self.hidden_size).to(self.device)
+            self.decoder = nn.Linear(self.hidden_size, 1).to(self.device)
+
+        # 1. Normalize the input covariates.
+        # The normalization is instance-wise, which means it's done on a per-sample basis.
+        # This helps the model focus on the patterns of the time series rather than the scale.
         x_enc, means, stdev = self._norm(x_enc)
 
         B, T, C = x_enc.shape
-        x_enc = x_enc.permute(0, 2, 1).reshape(B * C, -1)  # [B*C, T]
 
-        # split into non-overlapping tokens of length token_len
-        fold_out = x_enc.unfold(dimension=-1, size=self.token_len, step=self.token_len)  # [B*C, token_num, token_len]
-        token_num = fold_out.shape[1]
-
-        # TS tokenizer -> embeddings
-        ts_emb = self.encoder(fold_out)  # [B*C, token_num, hidden_size]
+        # 2. Encode the covariates.
+        # Instead of breaking down the time series into tokens and processing each channel independently,
+        # we now project the C covariates at each time step into the hidden dimension.
+        # This allows the model to learn the relationships between the covariates at each time step.
+        # Input: [B, T, C] -> Output: [B, T, hidden_size]
+        ts_emb = self.encoder(x_enc)
         if not isinstance(self.ts2llama, nn.Identity):
-            ts_emb = self.ts2llama(ts_emb)  # [B*C, token_num, llama_hidden]
+            ts_emb = self.ts2llama(ts_emb)  # [B, T, llama_hidden]
 
         # Optional mark mixing (expects broadcastable shape)
         if self.mix and x_mark_enc is not None:
-            ts_emb = ts_emb / (ts_emb.norm(dim=2, keepdim=True) + 1e-8)
-            x_mark = x_mark_enc / (x_mark_enc.norm(dim=2, keepdim=True) + 1e-8)
-            ts_emb = ts_emb + self.add_scale * x_mark
+             raise NotImplementedError("Mark mixing not implemented for this architecture yet")
 
-        # ===== Text cross-attention (optional) =====
+
+        # 3. Text cross-attention (optional).
+        # This part remains the same, but we no longer need to repeat the text embeddings for each channel.
         if self.use_text and x_dec is not None:
             if isinstance(x_dec, dict) and "input_ids" in x_dec:
                 # "ids" mode: run LLaMA on text tokens to get contextual embeddings
                 text_inputs = {k: v.to(self.device) for k, v in x_dec.items()}   # [B, T_txt]
                 text_hidden = self._llama_forward(**text_inputs)                  # [B, T_txt, llama_hidden]
-                text_hidden = text_hidden.repeat_interleave(C, dim=0)            # [B*C, T_txt, llama_hidden]
                 txt_for_cross = text_hidden
             else:
                 # "emb" mode: precomputed embeddings [B, T_txt, D_text]
                 if x_dec.dim() == 2:
                     x_dec = x_dec.unsqueeze(1)  # [B, 1, D]
-                x_dec = x_dec.to(self.device).repeat_interleave(C, dim=0)  # [B*C, T_txt, D_text]
+                x_dec = x_dec.to(self.device)
                 txt_for_cross = x_dec
 
-            ts_emb = self.cross(ts_emb, txt_for_cross)  # [B*C, token_num, llama_hidden]
+            ts_emb = self.cross(ts_emb, txt_for_cross)  # [B, T, llama_hidden]
 
-        # LLaMA over TS token embeddings
+        # 4. Pass the embeddings through the LLaMA backbone.
+        # The attention mask ensures that the model attends to all the tokens.
+        # Input: [B, T, llama_hidden] -> Output: [B, T, llama_hidden]
         attn_mask = torch.ones((ts_emb.shape[0], ts_emb.shape[1]), dtype=torch.long, device=ts_emb.device)
-        llama_out = self._llama_forward(inputs_embeds=ts_emb, attention_mask=attn_mask)  # [B*C, token_num, llama_hidden]
+        llama_out = self._llama_forward(inputs_embeds=ts_emb, attention_mask=attn_mask)
 
         # map back to TS hidden if we projected
         if not isinstance(self.llama2ts, nn.Identity):
-            llama_out = self.llama2ts(llama_out)  # [B*C, token_num, hidden_size]
+            llama_out = self.llama2ts(llama_out)  # [B, T, hidden_size]
 
-        # detokenize back to time
-        dec_out = self.decoder(llama_out)                 # [B*C, token_num, token_len]
-        dec_out = dec_out.reshape(B, C, -1).permute(0, 2, 1)  # [B, token_num*token_len, C]
+        # 5. Decode the LLaMA output to get the target prediction.
+        # The decoder projects the hidden state at each time step to a single value, which is the prediction for the target variable.
+        # Input: [B, T, hidden_size] -> Output: [B, T, 1]
+        dec_out = self.decoder(llama_out)
 
-        # de-normalize
-        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, token_num * self.token_len, 1))
-        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, token_num * self.token_len, 1))
+        # 6. De-normalize the output.
+        # We use the mean and standard deviation of the target variable (the last channel) to de-normalize the output.
+        target_means = means[:, :, -1:]
+        target_stdev = stdev[:, :, -1:]
+        dec_out = dec_out * target_stdev + target_means
         return dec_out
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
