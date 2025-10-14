@@ -15,8 +15,16 @@ import torch.distributed as dist
 
 warnings.filterwarnings('ignore')
 
-# Add this helper function once in exp_long_term_forecasting.py
+
 def _normalize_device(dev):
+    """Normalizes a device string or integer to a `torch.device` object.
+
+    Args:
+        dev (str, int, or torch.device): The device to normalize.
+
+    Returns:
+        torch.device: The normalized device.
+    """
     import torch
     if isinstance(dev, torch.device):
         return dev
@@ -38,10 +46,21 @@ def _normalize_device(dev):
 
 
 class Exp_Long_Term_Forecast(Exp_Basic):
+    """Experiment class for long-term forecasting.
+
+    This class extends `Exp_Basic` to provide a framework for running
+    long-term forecasting experiments.
+    """
+
     def __init__(self, args):
         super(Exp_Long_Term_Forecast, self).__init__(args)
-        
+
     def _build_model(self):
+        """Builds the model.
+
+        Returns:
+            torch.nn.Module: The constructed model.
+        """
         model = self.model_dict[self.args.model].Model(self.args)
         if self.args.use_multi_gpu:
             # normalize to cuda:<rank>
@@ -54,10 +73,24 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return model
 
     def _get_data(self, flag):
+        """Gets the data for a given flag.
+
+        Args:
+            flag (str): The flag indicating the data split,
+                one of 'train', 'val', or 'test'.
+
+        Returns:
+            tuple: A tuple containing the dataset and data loader.
+        """
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
 
     def _select_optimizer(self):
+        """Selects the optimizer.
+
+        Returns:
+            torch.optim.Optimizer: The selected optimizer.
+        """
         p_list = []
         for n, p in self.model.named_parameters():
             if not p.requires_grad:
@@ -72,9 +105,27 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
+        """Selects the loss function.
+
+        Returns:
+            torch.nn.Module: The selected loss function.
+        """
         return nn.MSELoss()
 
     def vali(self, vali_data, vali_loader, criterion, is_test=False):
+        """Validates the model.
+
+        Args:
+            vali_data (torch.utils.data.Dataset): The validation dataset.
+            vali_loader (torch.utils.data.DataLoader): The data loader for the
+                validation set.
+            criterion (torch.nn.Module): The loss function.
+            is_test (bool, optional): Whether this is a test run.
+                Defaults to False.
+
+        Returns:
+            float: The validation loss.
+        """
         total_loss = []
         total_count = []
         time_now = time.time()
@@ -138,6 +189,14 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return total_loss
 
     def train(self, setting):
+        """Trains the model.
+
+        Args:
+            setting (str): The setting for the experiment.
+
+        Returns:
+            torch.nn.Module: The trained model.
+        """
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
         test_data, test_loader = self._get_data(flag='test')
@@ -242,6 +301,13 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return self.model
 
     def test(self, setting, test=0):
+        """Tests the model.
+
+        Args:
+            setting (str): The setting for the experiment.
+            test (int, optional): Whether to load a saved model.
+                Defaults to 0.
+        """
         test_data, test_loader = self._get_data(flag='test')
 
         print("info:", self.args.test_seq_len, self.args.test_label_len, self.args.token_len, self.args.test_pred_len)

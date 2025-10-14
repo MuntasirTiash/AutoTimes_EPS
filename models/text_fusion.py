@@ -3,13 +3,22 @@ import torch
 import torch.nn as nn
 
 class CrossAttentionBlock(nn.Module):
-    """
-    Fuse time-series token embeddings (Q) with text embeddings (K,V).
+    """Fuse time-series token embeddings (Q) with text embeddings (K,V).
+
     Shapes:
       ts_tokens:  [B*, T_ts, d_model]
       text_tokens:[B*, T_txt, d_text]  (T_txt can be 1 if you use a pooled doc embedding)
     Returns:
       fused:      [B*, T_ts, d_model]
+
+    Args:
+        d_model (int): The dimension of the time-series token embeddings.
+        d_text (int): The dimension of the text embeddings.
+        n_heads (int, optional): The number of attention heads.
+            Defaults to 4.
+        ff_hidden (int, optional): The number of hidden units in the
+            feed-forward network. Defaults to 1024.
+        p_drop (float, optional): The dropout probability. Defaults to 0.1.
     """
     def __init__(self, d_model: int, d_text: int, n_heads: int = 4, ff_hidden: int = 1024, p_drop: float = 0.1):
         super().__init__()

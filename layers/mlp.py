@@ -1,9 +1,20 @@
 import torch.nn as nn
 
 class MLP(nn.Module):
-    '''
-    Multilayer perceptron to encode/decode high dimension representation of sequential data
-    '''
+    """Multilayer perceptron to encode/decode high dimension representation of
+    sequential data.
+
+    Args:
+        f_in (int): The number of input features.
+        f_out (int): The number of output features.
+        hidden_dim (int, optional): The number of hidden units in the MLP.
+            Defaults to 256.
+        hidden_layers (int, optional): The number of hidden layers in the MLP.
+            Defaults to 2.
+        dropout (float, optional): The dropout rate. Defaults to 0.1.
+        activation (str, optional): The activation function to use.
+            One of 'relu', 'tanh', or 'gelu'. Defaults to 'tanh'.
+    """
     def __init__(self, 
                  f_in, 
                  f_out, 

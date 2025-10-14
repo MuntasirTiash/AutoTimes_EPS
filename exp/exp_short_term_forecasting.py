@@ -17,10 +17,21 @@ import pandas
 warnings.filterwarnings('ignore')
 
 class Exp_Short_Term_Forecast(Exp_Basic):
+    """Experiment class for short-term forecasting.
+
+    This class extends `Exp_Basic` to provide a framework for running
+    short-term forecasting experiments.
+    """
+
     def __init__(self, args):
         super(Exp_Short_Term_Forecast, self).__init__(args)
 
     def _build_model(self):
+        """Builds the model.
+
+        Returns:
+            torch.nn.Module: The constructed model.
+        """
         if self.args.data == 'm4':
             self.args.token_len = M4Meta.horizons_map[self.args.seasonal_patterns]  # Up to M4 config
             self.args.seq_len = 2 * self.args.token_len  # input_len = 2*token_len
@@ -31,10 +42,24 @@ class Exp_Short_Term_Forecast(Exp_Basic):
         return model
 
     def _get_data(self, flag):
+        """Gets the data for a given flag.
+
+        Args:
+            flag (str): The flag indicating the data split,
+                one of 'train', 'val', or 'test'.
+
+        Returns:
+            tuple: A tuple containing the dataset and data loader.
+        """
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
 
     def _select_optimizer(self):
+        """Selects the optimizer.
+
+        Returns:
+            torch.optim.Optimizer: The selected optimizer.
+        """
         p_list = []
         for n, p in self.model.named_parameters():
             if not p.requires_grad:
@@ -47,6 +72,15 @@ class Exp_Short_Term_Forecast(Exp_Basic):
         return model_optim
 
     def _select_criterion(self, loss_name='MSE'):
+        """Selects the loss function.
+
+        Args:
+            loss_name (str, optional): The name of the loss function.
+                Defaults to 'MSE'.
+
+        Returns:
+            torch.nn.Module: The selected loss function.
+        """
         if loss_name == 'MSE':
             return nn.MSELoss()
         elif loss_name == 'MAPE':
@@ -57,6 +91,14 @@ class Exp_Short_Term_Forecast(Exp_Basic):
             return smape_loss()
 
     def train(self, setting):
+        """Trains the model.
+
+        Args:
+            setting (str): The setting for the experiment.
+
+        Returns:
+            torch.nn.Module: The trained model.
+        """
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
 
@@ -135,6 +177,18 @@ class Exp_Short_Term_Forecast(Exp_Basic):
         return self.model
 
     def vali(self, train_loader, vali_loader, criterion):
+        """Validates the model.
+
+        Args:
+            train_loader (torch.utils.data.DataLoader): The data loader for the
+                training set.
+            vali_loader (torch.utils.data.DataLoader): The data loader for the
+                validation set.
+            criterion (torch.nn.Module): The loss function.
+
+        Returns:
+            float: The validation loss.
+        """
         x, _ = train_loader.dataset.last_insample_window()
         y = vali_loader.dataset.timeseries
         x = torch.tensor(x, dtype=torch.float32).to(self.device)
@@ -168,6 +222,13 @@ class Exp_Short_Term_Forecast(Exp_Basic):
         return loss
 
     def test(self, setting, test=0):
+        """Tests the model.
+
+        Args:
+            setting (str): The setting for the experiment.
+            test (int, optional): Whether to load a saved model.
+                Defaults to 0.
+        """
         _, train_loader = self._get_data(flag='train')
         _, test_loader = self._get_data(flag='test')
         x, _ = train_loader.dataset.last_insample_window()

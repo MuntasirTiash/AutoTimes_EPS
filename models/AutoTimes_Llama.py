@@ -7,6 +7,14 @@ from models.text_fusion import CrossAttentionBlock
 
 
 def _str_to_torch_dtype(name: str) -> torch.dtype:
+    """Converts a string to a torch.dtype.
+
+    Args:
+        name (str): The name of the dtype.
+
+    Returns:
+        torch.dtype: The corresponding torch.dtype.
+    """
     name = (name or "float32").lower()
     if name in ("fp32", "float32"): return torch.float32
     if name in ("fp16", "float16"): return torch.float16
@@ -17,6 +25,12 @@ def _str_to_torch_dtype(name: str) -> torch.dtype:
 
 
 class Model(nn.Module):
+    """AutoTimes model with LLaMA as the backbone.
+
+    Args:
+        configs (object): An object containing the configuration parameters.
+    """
+
     def __init__(self, configs):
         super().__init__()
         # ---------- device ----------
@@ -102,8 +116,14 @@ class Model(nn.Module):
         return x, means, stdev
 
     def _llama_forward(self, **kwargs):
-        """
-        Wrap LLaMA forward to avoid grad graph when frozen (saves VRAM).
+        """Wraps the LLaMA forward pass to avoid creating a gradient graph when
+        the model is frozen.
+
+        Args:
+            **kwargs: Keyword arguments to be passed to the LLaMA model.
+
+        Returns:
+            torch.Tensor: The output of the LLaMA model.
         """
         if self.freeze_llama:
             with torch.no_grad():
@@ -114,6 +134,17 @@ class Model(nn.Module):
 
     # -------- main path --------
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
+        """Forward pass of the model.
+
+        Args:
+            x_enc (torch.Tensor): The input tensor.
+            x_mark_enc (torch.Tensor): The input marks.
+            x_dec (torch.Tensor): The decoder input.
+            x_mark_dec (torch.Tensor): The decoder input marks.
+
+        Returns:
+            torch.Tensor: The output of the model.
+        """
         # x_enc: [B, T, C]  (C variables; last channel is target)
         x_enc, means, stdev = self._norm(x_enc)
 
@@ -170,5 +201,15 @@ class Model(nn.Module):
         return dec_out
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
+        """Forward pass of the model.
+
+        Args:
+            x_enc (torch.Tensor): The input tensor.
+            x_mark_enc (torch.Tensor): The input marks.
+            x_dec (torch.Tensor): The decoder input.
+            x_mark_dec (torch.Tensor): The decoder input marks.
+
+        Returns:
+            torch.Tensor: The output of the model.
+        """
         return self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
-    

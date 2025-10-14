@@ -4,6 +4,12 @@ from transformers import OPTForCausalLM
 from layers.mlp import MLP
 
 class Model(nn.Module):
+    """AutoTimes model with OPT-1.3B as the backbone.
+
+    Args:
+        configs (object): An object containing the configuration parameters.
+    """
+
     def __init__(self, configs):
         super(Model, self).__init__()
         self.token_len = configs.token_len
@@ -42,7 +48,18 @@ class Model(nn.Module):
                             configs.dropout, configs.mlp_activation) 
     
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
-        means = x_enc.mean(1, keepdim=True).detach()    
+        """Forward pass of the model.
+
+        Args:
+            x_enc (torch.Tensor): The input tensor.
+            x_mark_enc (torch.Tensor): The input marks.
+            x_dec (torch.Tensor): The decoder input.
+            x_mark_dec (torch.Tensor): The decoder input marks.
+
+        Returns:
+            torch.Tensor: The output of the model.
+        """
+        means = x_enc.mean(1, keepdim=True).detach()
         x_enc = x_enc - means
         stdev = torch.sqrt(
             torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
@@ -79,4 +96,15 @@ class Model(nn.Module):
         return dec_out
     
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
+        """Forward pass of the model.
+
+        Args:
+            x_enc (torch.Tensor): The input tensor.
+            x_mark_enc (torch.Tensor): The input marks.
+            x_dec (torch.Tensor): The decoder input.
+            x_mark_dec (torch.Tensor): The decoder input marks.
+
+        Returns:
+            torch.Tensor: The output of the model.
+        """
         return self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)

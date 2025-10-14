@@ -20,16 +20,49 @@ import numpy as np
 
 warnings.filterwarnings('ignore')
 
+
 def SMAPE(pred, true):
+    """Calculates the Symmetric Mean Absolute Percentage Error (SMAPE).
+
+    Args:
+        pred (np.ndarray): The predicted values.
+        true (np.ndarray): The true values.
+
+    Returns:
+        float: The SMAPE score.
+    """
     return np.mean(200 * np.abs(pred - true) / (np.abs(pred) + np.abs(true) + 1e-8))
+
+
 def MAPE(pred, true):
-    return np.mean(np.abs(100 * (pred - true) / (true +1e-8)))
+    """Calculates the Mean Absolute Percentage Error (MAPE).
+
+    Args:
+        pred (np.ndarray): The predicted values.
+        true (np.ndarray): The true values.
+
+    Returns:
+        float: The MAPE score.
+    """
+    return np.mean(np.abs(100 * (pred - true) / (true + 1e-8)))
+
 
 class Exp_In_Context_Forecast(Exp_Basic):
+    """Experiment class for in-context forecasting.
+
+    This class extends the `Exp_Basic` class to provide a framework for
+    running in-context forecasting experiments.
+    """
+
     def __init__(self, args):
         super(Exp_In_Context_Forecast, self).__init__(args)
 
     def _build_model(self):
+        """Builds the model.
+
+        Returns:
+            torch.nn.Module: The constructed model.
+        """
         if self.args.data == 'm4':
             self.args.frequency_map = M4Meta.frequency_map[self.args.seasonal_patterns]
         self.device = self.args.gpu
@@ -37,10 +70,24 @@ class Exp_In_Context_Forecast(Exp_Basic):
         return model
 
     def _get_data(self, flag):
+        """Gets the data for a given flag.
+
+        Args:
+            flag (str): The flag indicating the data split,
+                one of 'train', 'val', or 'test'.
+
+        Returns:
+            tuple: A tuple containing the dataset and data loader.
+        """
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
 
     def _select_optimizer(self):
+        """Selects the optimizer.
+
+        Returns:
+            torch.optim.Optimizer: The selected optimizer.
+        """
         p_list = []
         for n, p in self.model.named_parameters():
             if not p.requires_grad:
@@ -55,6 +102,15 @@ class Exp_In_Context_Forecast(Exp_Basic):
         return model_optim
 
     def _select_criterion(self, loss_name='MSE'):
+        """Selects the loss function.
+
+        Args:
+            loss_name (str, optional): The name of the loss function.
+                Defaults to 'MSE'.
+
+        Returns:
+            torch.nn.Module: The selected loss function.
+        """
         if loss_name == 'MSE':
             return nn.MSELoss()
         elif loss_name == 'MAPE':
@@ -65,6 +121,14 @@ class Exp_In_Context_Forecast(Exp_Basic):
             return smape_loss()
 
     def train(self, setting):
+        """Trains the model.
+
+        Args:
+            setting (str): The setting for the experiment.
+
+        Returns:
+            torch.nn.Module: The trained model.
+        """
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
         
@@ -155,6 +219,18 @@ class Exp_In_Context_Forecast(Exp_Basic):
         return self.model
 
     def vali(self, train_loader, vali_loader, criterion):
+        """Validates the model.
+
+        Args:
+            train_loader (torch.utils.data.DataLoader): The data loader for the
+                training set.
+            vali_loader (torch.utils.data.DataLoader): The data loader for the
+                validation set.
+            criterion (torch.nn.Module): The loss function.
+
+        Returns:
+            float: The validation loss.
+        """
         x, _ = train_loader.dataset.last_insample_window()
         y = vali_loader.dataset.timeseries
         x = torch.tensor(x, dtype=torch.float32).to(self.device)
@@ -184,8 +260,19 @@ class Exp_In_Context_Forecast(Exp_Basic):
         return loss
 
     def vali2(self, vali_data, vali_loader, criterion):
+        """Validates the model on a second validation set.
+
+        Args:
+            vali_data (torch.utils.data.Dataset): The second validation dataset.
+            vali_loader (torch.utils.data.DataLoader): The data loader for the
+                second validation set.
+            criterion (torch.nn.Module): The loss function.
+
+        Returns:
+            float: The validation loss.
+        """
         total_loss = []
-        count= []
+        count = []
         self.model.eval()
         with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(vali_loader):
@@ -216,6 +303,12 @@ class Exp_In_Context_Forecast(Exp_Basic):
         return total_loss    
 
     def test_(self, test_loader):
+        """Tests the model on a test set.
+
+        Args:
+            test_loader (torch.utils.data.DataLoader): The data loader for the
+                test set.
+        """
         preds = []
         trues = []
 
@@ -249,6 +342,13 @@ class Exp_In_Context_Forecast(Exp_Basic):
         print('mape:{:4f}, smape:{:.4f}'.format(mape, smape))
         
     def test(self, setting, test=0):
+        """Tests the model.
+
+        Args:
+            setting (str): The setting for the experiment.
+            test (int, optional): Whether to load a saved model.
+                Defaults to 0.
+        """
         if test:
             print('loading model')
             setting = self.args.test_dir
