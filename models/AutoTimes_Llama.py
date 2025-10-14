@@ -188,4 +188,3 @@ class Model(nn.Module):
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
         return self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
-    
