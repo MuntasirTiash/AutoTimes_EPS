@@ -190,6 +190,20 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     outputs = self.model(batch_x, batch_x_mark, x_dec, batch_y_mark)
                     loss = criterion(outputs[:, :, -1:], batch_y)
                     loss.backward()
+
+                    # --- Gradient Visualization ---
+                    if (i + 1) % 100 == 0:
+                        if (self.args.use_multi_gpu and self.args.local_rank == 0) or not self.args.use_multi_gpu:
+                            print("\n--- Gradient Flow ---")
+                            for name, param in self.model.named_parameters():
+                                if param.grad is not None and param.requires_grad:
+                                    grad_mean = param.grad.abs().mean()
+                                    grad_max = param.grad.abs().max()
+                                    # Print for key layers
+                                    if 'encoder' in name or 'decoder' in name or 'cross' in name:
+                                        print(f"{name:<50} | Grad Mean: {grad_mean:<15.10f} | Grad Max: {grad_max:<15.10f}")
+                            print("---------------------\n")
+
                     model_optim.step()
 
                 loss_val += loss.detach()
