@@ -19,6 +19,7 @@ def _str_to_torch_dtype(name: str) -> torch.dtype:
 class Model(nn.Module):
     def __init__(self, configs):
         super().__init__()
+        self._print_grad_status = True
         # ---------- device ----------
         if getattr(configs, "use_multi_gpu", False):
             self.device = f"cuda:{configs.local_rank}"
@@ -125,6 +126,16 @@ class Model(nn.Module):
             C = x_enc.shape[-1]
             self.encoder = nn.Linear(C, self.hidden_size).to(self.device)
             self.decoder = nn.Linear(self.hidden_size, 1).to(self.device)
+            if self._print_grad_status:
+                print("--- Trainable Parameter Status ---")
+                for name, param in self.named_parameters():
+                    if 'llama' in name:
+                        if 'layers.0' in name or 'layers.31' in name: # Print for first and last layer for brevity
+                             print(f"{name}: requires_grad={param.requires_grad}")
+                    else:
+                        print(f"{name}: requires_grad={param.requires_grad}")
+                print("---------------------------------")
+                self._print_grad_status = False
 
         # 1. Normalize the input covariates.
         # The normalization is instance-wise, which means it's done on a per-sample basis.
